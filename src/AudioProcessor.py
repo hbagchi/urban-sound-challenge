@@ -1,25 +1,24 @@
 #--------------------------------------------------------------------------------------------------
 # Python libraries import
 #--------------------------------------------------------------------------------------------------
-import numpy as np
 import os
 from pathlib import Path
-import pandas as pd
-import librosa, librosa.display
 
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+plt.rcParams.update({'figure.max_open_warning': 0})
+from matplotlib.pyplot import specgram
 from sklearn.preprocessing import LabelEncoder
+
+from IPython.display import SVG
+
+import librosa, librosa.display
 
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, Activation
 from keras.utils.vis_utils import model_to_dot
 from keras.utils import np_utils
-
-import matplotlib.pyplot as plt
-plt.rcParams.update({'figure.max_open_warning': 0})
-
-from matplotlib.pyplot import specgram
-
-from IPython.display import SVG
 
 # %%
 #--------------------------------------------------------------------------------------------------
@@ -112,27 +111,25 @@ def extract_features(row):
 
 # %%
 def dump_features(features, features_filename):
-    features = np.vstack(features)
-    np.savetxt(features_filename, features, delimiter=",")
+    features_df = pd.DataFrame(features)
+    features_df.to_pickle(features_filename)
 
 # %%
-features_train_file = Path("./features_train.csv")
+features_train_file = Path("./features_train.pkl")
 
 if not features_train_file.is_file():
     features = train.apply(extract_features, axis=1)
     dump_features(features, features_train_file)
     train = train.assign(features=features.values)
 else:
-    features = pd.read_csv('./features_train.csv', header=None)
+    features = pd.read_pickle('./features_train.pkl')
     train = train.assign(features=features.values)
 
 # %%
-
 y = np.array(train.loc[:, 'Class'])
 X = np.array(train.loc[:, 'features'])
 
 lb = LabelEncoder()
-
 y = np_utils.to_categorical(lb.fit_transform(y))
 
 # %%
@@ -176,14 +173,14 @@ DATA_PATH = 'test'
 
 test = pd.read_csv('./data/' + DATA_PATH + '.csv')
 
-features_test_file = Path("./features_test.csv")
+features_test_file = Path("./features_test.pkl")
 
 if not features_test_file.is_file():
     features = test.apply(extract_features, axis=1)
     dump_features(features, features_test_file)
     test = test.assign(features=features.values)
 else:
-    features = pd.read_csv('./features_test.csv')
+    features = pd.read_pickle('./features_test.pkl')
     test = test.assign(features=features.values)
 
 # %%

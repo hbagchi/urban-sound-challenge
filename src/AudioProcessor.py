@@ -158,19 +158,21 @@ else:
 
 # %%
 y = np.array(train.loc[:, 'Class'])
-X = np.array(train.loc[:, 'features'])
-
 lb = LabelEncoder()
 y = np_utils.to_categorical(lb.fit_transform(y))
 
+X = np.array(train.loc[:, 'features'])
+X = np.vstack(X)
+
 # %%
-num_labels = y.shape[1]
+num_labels = y.shape[1] # Toral number of output labels
+num_inputs = X.shape[1] # Total number pf input variables
 
 # build model
 model = Sequential()
 
 # Input layer
-model.add(Dense(256, input_shape=(217,)))
+model.add(Dense(256, input_shape=(num_inputs,)))
 model.add(Activation('relu'))
 model.add(Dropout(0.5))
 
@@ -187,14 +189,9 @@ model.add(Activation('softmax'))
 model.compile(loss='categorical_crossentropy', metrics=['accuracy'], optimizer='adam')
 
 # %%
-X.shape, y.shape
-
 SVG(model_to_dot(model, show_shapes=True, show_layer_names=True).create(prog='dot', format='svg'))
 
-X = np.vstack(X)
-
-X.shape, y.shape
-
+# %%
 model.fit(X, y, batch_size=32, epochs=50, validation_split=0.20, callbacks=[metrics])
 
 # %%

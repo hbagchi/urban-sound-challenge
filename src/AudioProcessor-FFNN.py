@@ -1,3 +1,9 @@
+"""
+Urban Sound Challenge - Sound Classification using Feed Forward Neural Network (FFNN)
+@author: - Hitesh Bagchi
+Version: 1.0
+Date: 25th June 2018
+"""
 #--------------------------------------------------------------------------------------------------
 # Python libraries import
 #--------------------------------------------------------------------------------------------------

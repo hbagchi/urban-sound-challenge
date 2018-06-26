@@ -68,6 +68,7 @@ def plot_log_power_specgram(class_audios, raw_audios):
         librosa.display.specshow(D, x_axis='time', y_axis='log')
         plt.title(label)
 
+# %%
 
 # data directory and csv file should have the same name
 DATA_PATH = 'train'

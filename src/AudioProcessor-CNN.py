@@ -7,16 +7,63 @@ Date: 25th June 2018
 #--------------------------------------------------------------------------------------------------
 # Python libraries import
 #--------------------------------------------------------------------------------------------------
-from pathlib import Path
+import os
+import librosa
+import pandas as pd
+import numpy as np
+from functools import partial
 
 # %%
-
-data_dir = "./data/trainShort"
-
-def extract_features(data_dir, bands = 60, frames = 41, file_ext="*.wav"):
-    pathlist = Path(data_dir).glob(file_ext)
-    for file_path in pathlist:
-        print(file_path)
+def windows(data, window_size):
+    start = 0
+    while start < len(data):
+        yield int(start), int(start + window_size)
+        start += (window_size / 2)
 
 # %%
-extract_features(data_dir)
+#--------------------------------------------------------------------------------------------------
+# function to load files and extract features
+#--------------------------------------------------------------------------------------------------
+def extract_features(data_dir, row, bands = 60, frames = 41, file_ext="*.wav"):
+
+    window_size = 512 * (frames - 1)
+    log_specgrams = []
+    labels = []
+
+    file_name = os.path.join(os.path.abspath('./data/'), data_dir, str(row.ID) + '.wav')
+
+    # handle exception to check for corrupted or invalid file
+    try:
+        X, sample_rate = librosa.load(file_name)
+        label = row.Class
+        for (start, end) in windows(X, window_size):
+            if(len(X[start:end]) == window_size):
+                signal = X[start:end]
+                melspec = librosa.feature.melspectrogram(signal, n_mels = bands)
+                logspec = librosa.amplitude_to_db(melspec)
+                logspec = logspec.T.flatten()[:, np.newaxis].T
+                log_specgrams.append(logspec)
+                labels.append(label)
+
+        log_specgrams = np.asarray(log_specgrams).reshape(len(log_specgrams),bands,frames, 1)
+        features = np.concatenate((log_specgrams, np.zeros(np.shape(log_specgrams))), axis = 3)
+
+        for i in range(len(features)):
+            features[i, :, :, 1] = librosa.feature.delta(features[i, :, :, 0])
+
+    except Exception as e:
+        print(file_name, e)
+        return None
+
+    return np.array(features), np.array(labels)
+
+# %%
+#--------------------------------------------------------------------------------------------------
+# Load training data and extract features
+#--------------------------------------------------------------------------------------------------
+DATA_DIR = 'trainShort'
+
+train = pd.read_csv(os.path.join(os.path.abspath('./data/'), DATA_DIR + '.csv'))
+
+extract_features_train = partial(extract_features, DATA_DIR)
+features, labels = train.apply(extract_features_train, axis=1)

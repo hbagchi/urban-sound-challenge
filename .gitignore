@@ -1,4 +1,5 @@
 /data/test/*.wav
 /data/train/*.wav
 /data/trainShort/*.wav
+/data/trainMini/*.wav
 .spyproject

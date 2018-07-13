@@ -4,9 +4,9 @@ Urban Sound Challenge - Sound Classification using Feed Forward Neural Network (
 Version: 1.0
 Date: 25th June 2018
 """
-#--------------------------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 # Python libraries import
-#--------------------------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 import os
 from pathlib import Path
 
@@ -29,9 +29,9 @@ from keras.utils.vis_utils import model_to_dot
 from keras.utils import np_utils
 
 # %%
-#--------------------------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 # Data Exploration
-#--------------------------------------------------------------------------------------------------
+#-------------------------------------------------------------------------------
 def load_sample_audios(train):
     sample = train.groupby('Class', as_index=False).agg(np.random.choice)
     raw_audios = []
@@ -173,20 +173,20 @@ X = np.vstack(X)
 
 # %%
 num_labels = y.shape[1] # Toral number of output labels
-num_inputs = X.shape[1] # Total number pf input variables
+num_inputs = X.shape[1] # Total number 0f input variables
 
 # build model
 model = Sequential()
 
 # Input layer
-model.add(Dense(256, input_shape=(num_inputs,)))
+model.add(Dense(156, input_shape=(num_inputs,)))
 model.add(Activation('relu'))
-model.add(Dropout(0.5))
+model.add(Dropout(0.25))
 
 # Hidden layer
-model.add(Dense(256))
+model.add(Dense(156))
 model.add(Activation('relu'))
-model.add(Dropout(0.5))
+model.add(Dropout(0.25))
 
 # Output layer
 model.add(Dense(num_labels))
@@ -199,7 +199,7 @@ model.compile(loss='categorical_crossentropy', metrics=['accuracy'], optimizer='
 SVG(model_to_dot(model, show_shapes=True, show_layer_names=True).create(prog='dot', format='svg'))
 
 # %%
-model.fit(X, y, batch_size=32, epochs=50, validation_split=0.20, callbacks=[metrics])
+model.fit(X, y, batch_size=64, epochs=50, validation_split=0.20, callbacks=[metrics])
 
 # %%
 # Plot the cost against epoch

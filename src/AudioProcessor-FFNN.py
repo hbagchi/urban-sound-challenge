@@ -202,7 +202,7 @@ X = np.array(train.loc[:, 'features'])
 X = np.vstack(X)
 
 # Only MFCC features
-# X = X[:, :64]
+X = X[:, :64]
 
 X -= X.mean(axis=0)
 X /= X.std(axis=0)
@@ -246,43 +246,20 @@ SVG(model_to_dot(model_inst,
                  show_shapes=True, 
                  show_layer_names=True).create(prog='dot', format='svg'))
 
-# val_loss
-early_stop = EarlyStopping(monitor='loss', min_delta=0, 
+early_stop = EarlyStopping(monitor='val_loss', min_delta=0, 
                        patience=2, verbose=0, mode='auto')
 
-# train set divided into 80% training set and 20% validation set
-# 80% train set = train set, 20% validation set = test set
+# 80% training set, 20% validation set
+
 x_val = X[4348:]
 X = X[:4348]
 
 y_val = y[4348:]
 y = y[:4348]
 
-train_orig = train[4348:].copy()
-
 # %%
-# validation_data=(x_val, y_val), 
-# metrics
 history = model_inst.fit(X, y, batch_size=512, epochs=100, 
-                         callbacks=[early_stop])
-
-# %%
-# calculate predictions on hold out set
-pred_test = model_inst.predict_classes(x_val)
-pred_test_class = lb.inverse_transform(pred_test)
-
-train_orig.loc[:, "PredClass"] = pred_test_class
-
-# drop the 'feature' column as it is not required for submission
-train_orig = train_orig.drop(columns=['features'], axis=1)
-
-train_orig['status'] = train_orig.Class == train_orig.PredClass
-
-train_orig.groupby("status").size()[1]/(train_orig.groupby("status").size()[0] + train_orig.groupby("status").size()[1])
-
-train_orig.to_csv('sub_test_01.csv', index=False)
-
-#%%
+                         validation_data=(x_val, y_val), callbacks=[metrics, early_stop])
 
 # Extract cost from history
 history_dict = history.history
@@ -332,7 +309,7 @@ X_test = np.array(test.loc[:, 'features'])
 X_test = np.vstack(X_test)
 
 # Only MFCC features
-# X_test = X_test[:, :64]
+X_test = X_test[:, :64]
 
 X_test -= X_test.mean(axis=0)
 X_test /= X_test.std(axis=0)

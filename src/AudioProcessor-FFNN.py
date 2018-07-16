@@ -4,34 +4,38 @@ Urban Sound Challenge - Sound Classification using Feed Forward Neural Network (
 Version: 1.0
 Date: 25th June 2018
 """
-#-------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 # Python libraries import
-#-------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 import os
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from IPython.display import SVG
+
+from matplotlib.pyplot import specgram
 import matplotlib.pyplot as plt
 plt.rcParams.update({'figure.max_open_warning': 0})
-from matplotlib.pyplot import specgram
+
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import f1_score, precision_score, recall_score
 
-from IPython.display import SVG
-
+# Audio library to extract audio features
 import librosa, librosa.display
 
+# Deep Learning library for model learning and prediction
 from keras.models import Sequential
-from keras.layers import Dense, Dropout, Activation
-from keras.callbacks import Callback
+from keras import regularizers
+from keras.layers import Dense, Activation, Dropout
+from keras.callbacks import Callback, EarlyStopping
 from keras.utils.vis_utils import model_to_dot
 from keras.utils import np_utils
 
 # %%
-#-------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 # Data Exploration
-#-------------------------------------------------------------------------------
+#------------------------------------------------------------------------------
 def load_sample_audios(train):
     sample = train.groupby('Class', as_index=False).agg(np.random.choice)
     raw_audios = []
@@ -68,14 +72,28 @@ def plot_log_power_specgram(class_audios, raw_audios):
         librosa.display.specshow(D, x_axis='time', y_axis='log')
         plt.title(label)
 
-# %%
+# Print raw mfcc for a sample
+def extract_raw_mfcc(class_audios, raw_audios):
+    for x, label in zip(raw_audios, class_audios):
+        mfccs = librosa.feature.mfcc(y=x, n_mfcc=64).T
+        return (label, mfccs)
 
+# %%
 # data directory and csv file should have the same name
+
 DATA_PATH = 'train'
 
 train = pd.read_csv('./data/' + DATA_PATH + '.csv')
 
 class_audios, raw_audios = load_sample_audios(train)
+
+# %%
+label, mfccs_arr = extract_raw_mfcc(class_audios, raw_audios)
+label, mfccs_arr
+
+# %%
+# Plot waveform, specgram and log power specgram
+
 plot_waves(class_audios, raw_audios)
 plot_specgram(class_audios, raw_audios)
 plot_log_power_specgram(class_audios, raw_audios)
@@ -93,7 +111,9 @@ files_in_error = []
 # Extracts audio features from data
 def extract_features(row):
     # function to load files and extract features
-    file_name = os.path.join(os.path.abspath('./data/'), DATA_PATH, str(row.ID) + '.wav')
+    file_name = os.path.join(
+            os.path.abspath('./data/'), 
+            DATA_PATH, str(row.ID) + '.wav')
 
     # handle exception to check if there isn't a file which is corrupted
     try:
@@ -102,12 +122,22 @@ def extract_features(row):
 
         stft = np.abs(librosa.stft(X))
 
-        mfccs = np.mean(librosa.feature.mfcc(y=X, sr=sample_rate, n_mfcc=64).T, axis=0)
-        chroma = np.mean(librosa.feature.chroma_stft(S=stft, sr=sample_rate).T, axis=0)
-        mel = np.mean(librosa.feature.melspectrogram(X, sr=sample_rate).T, axis=0)
-        tonnetz = np.mean(librosa.feature.tonnetz(y=librosa.effects.harmonic(X),
-                                                  sr=sample_rate).T, axis=0)
-        contrast = np.mean(librosa.feature.spectral_contrast(S=stft, sr=sample_rate).T, axis=0)
+        mfcc_count = 64
+
+        mfccs = np.mean(librosa.feature.mfcc(
+                y=X, sr=sample_rate, n_mfcc=mfcc_count).T, axis=0)
+        
+        chroma = np.mean(librosa.feature.chroma_stft(
+                S=stft, sr=sample_rate).T, axis=0)
+        
+        mel = np.mean(librosa.feature.melspectrogram(
+                X, sr=sample_rate).T, axis=0)
+        
+        tonnetz = np.mean(librosa.feature.tonnetz(
+                y=librosa.effects.harmonic(X), sr=sample_rate).T, axis=0)
+        
+        contrast = np.mean(librosa.feature.spectral_contrast(
+                S=stft, sr=sample_rate).T, axis=0)
 
     except Exception as e:
         print(file_name, e)
@@ -171,43 +201,114 @@ y = np_utils.to_categorical(lb.fit_transform(y))
 X = np.array(train.loc[:, 'features'])
 X = np.vstack(X)
 
+# Only MFCC features
+# X = X[:, :64]
+
+X -= X.mean(axis=0)
+X /= X.std(axis=0)
+
+# %%
+# Build learning model
+def buildModel(num_inputs, num_labels):
+    
+    # build model
+    model = Sequential()
+
+    # Input layer
+    model.add(Dense(128, kernel_regularizer=regularizers.l2(0.001),
+                    input_shape=(num_inputs,)))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.2))
+    
+    # Hidden layer
+    model.add(Dense(128, kernel_regularizer=regularizers.l2(0.001)))
+    model.add(Activation('relu'))
+    model.add(Dropout(0.2))
+
+    # Output layer
+    model.add(Dense(num_labels))
+    model.add(Activation('softmax'))
+
+    # Compile model
+    model.compile(optimizer='rmsprop',
+                  loss='categorical_crossentropy', 
+                  metrics=['accuracy'])
+    
+    return model
+
 # %%
 num_labels = y.shape[1] # Toral number of output labels
 num_inputs = X.shape[1] # Total number 0f input variables
 
-# build model
-model = Sequential()
+model_inst = buildModel(num_inputs, num_labels)    
 
-# Input layer
-model.add(Dense(156, input_shape=(num_inputs,)))
-model.add(Activation('relu'))
-model.add(Dropout(0.25))
+SVG(model_to_dot(model_inst, 
+                 show_shapes=True, 
+                 show_layer_names=True).create(prog='dot', format='svg'))
 
-# Hidden layer
-model.add(Dense(156))
-model.add(Activation('relu'))
-model.add(Dropout(0.25))
+# val_loss
+early_stop = EarlyStopping(monitor='loss', min_delta=0, 
+                       patience=2, verbose=0, mode='auto')
 
-# Output layer
-model.add(Dense(num_labels))
-model.add(Activation('softmax'))
+# train set divided into 80% training set and 20% validation set
+# 80% train set = train set, 20% validation set = test set
+x_val = X[4348:]
+X = X[:4348]
 
-# Compile model
-model.compile(loss='categorical_crossentropy', metrics=['accuracy'], optimizer='adam')
+y_val = y[4348:]
+y = y[:4348]
 
-# %%
-SVG(model_to_dot(model, show_shapes=True, show_layer_names=True).create(prog='dot', format='svg'))
+train_orig = train[4348:].copy()
 
 # %%
-model.fit(X, y, batch_size=64, epochs=50, validation_split=0.20, callbacks=[metrics])
+# validation_data=(x_val, y_val), 
+# metrics
+history = model_inst.fit(X, y, batch_size=512, epochs=100, 
+                         callbacks=[early_stop])
 
 # %%
-# Plot the cost against epoch
+# calculate predictions on hold out set
+pred_test = model_inst.predict_classes(x_val)
+pred_test_class = lb.inverse_transform(pred_test)
+
+train_orig.loc[:, "PredClass"] = pred_test_class
+
+# drop the 'feature' column as it is not required for submission
+train_orig = train_orig.drop(columns=['features'], axis=1)
+
+train_orig['status'] = train_orig.Class == train_orig.PredClass
+
+train_orig.groupby("status").size()[1]/(train_orig.groupby("status").size()[0] + train_orig.groupby("status").size()[1])
+
+train_orig.to_csv('sub_test_01.csv', index=False)
+
+#%%
+
+# Extract cost from history
+history_dict = history.history
+history_dict.keys()
+loss_values = history_dict['loss']
+val_loss_values = history_dict['val_loss']
+epochs = metrics.val_epochs
+
+# Plot training and validation cost against epoch
+train_loss_plot, = plt.plot(epochs, loss_values, 'bo', label='Training Loss')
+val_loss_plot, = plt.plot(epochs, val_loss_values, 'b', label='Validation Loss')
+plt.title('Training and Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend([train_loss_plot, val_loss_plot], ["Training Loss", "Validation Loss"])
+
+# %%
+# Plot precision, recall and f1-score against epoch
+plt.clf()
 f1s_plot, = plt.plot(metrics.val_epochs, metrics.val_f1s, 'r+')
 precisions_plot, = plt.plot(metrics.val_epochs, metrics.val_precisions, 'b*')
 recalls_plot, = plt.plot(metrics.val_epochs, metrics.val_recalls, 'g^')
-
-plt.legend([f1s_plot, precisions_plot, recalls_plot], ["F1-Score", "Precision", "Recall" ])
+plt.title('Precision, Recall and F1-Score')
+plt.xlabel('Epochs')
+plt.legend([f1s_plot, precisions_plot, recalls_plot], 
+           ["F1-Score", "Precision", "Recall"])
 
 # %%
 
@@ -230,10 +331,16 @@ else:
 X_test = np.array(test.loc[:, 'features'])
 X_test = np.vstack(X_test)
 
+# Only MFCC features
+# X_test = X_test[:, :64]
+
+X_test -= X_test.mean(axis=0)
+X_test /= X_test.std(axis=0)
+
 X_test.shape
 
 # calculate predictions
-predictions = model.predict_classes(X_test)
+predictions = model_inst.predict_classes(X_test)
 predict_class = lb.inverse_transform(predictions)
 
 test['Class'] = predict_class

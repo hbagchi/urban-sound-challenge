@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from IPython.display import SVG
+from functools import partial
 
 import matplotlib.pyplot as plt
 plt.rcParams.update({'figure.max_open_warning': 0})
@@ -45,6 +46,21 @@ def load_sample_audios(train_df, data_path):
         raw_audios.append(x)
         class_audios.append(sample.Class[i])
     return class_audios, raw_audios
+
+# ORIGINAL TEST SET
+def load_plot_test_sample(test_df, test_data_path):
+    file_index = str(int(test_df.sample(n=1).ID.values))    
+    file_path = os.path.join(
+            os.path.abspath(test_data_path), 
+            file_index + '.wav')
+    x, sr = librosa.load(file_path)
+    x = librosa.resample(x, sr, 22050)
+
+    plt.clf()
+    plt.figure(figsize=(8, 20))
+    plt.subplot(10, 1, 1)
+    librosa.display.waveplot(x)
+    plt.title(file_path)
 
 # Plot Waveplot
 def plot_waves(class_audios, raw_audios):
@@ -82,15 +98,16 @@ def print_raw_mfcc(class_audios, raw_audios):
         mfccs = librosa.feature.mfcc(y=x, n_mfcc=64).T
         print (label, mfccs, '\n')
 
+
 # %%
 # data directory and csv file should have the same name
 
-CSV_PATH = './data/train.csv'   # Path where csv files are stored
-DATA_PATH = './data/train/'     # Path where audio files are stored
+TRAIN_CSV_PATH = './data/train.csv'   # Path where csv files are stored
+TRAIN_DATA_PATH = './data/train/'     # Path where audio files are stored
 
-train_df = pd.read_csv(CSV_PATH)
+train_df = pd.read_csv(TRAIN_CSV_PATH)
 
-class_audios, raw_audios = load_sample_audios(train_df, DATA_PATH)
+class_audios, raw_audios = load_sample_audios(train_df, TRAIN_DATA_PATH)
 
 # %%
 print_raw_mfcc(class_audios, raw_audios)
@@ -103,6 +120,15 @@ plot_specgram(class_audios, raw_audios)
 plot_log_power_specgram(class_audios, raw_audios)
 
 # %%
+# Load and Plot TEST SET
+TEST_CSV_PATH = './data/test.csv'     # Path where audio files are stored for test
+TEST_DATA_PATH = './data/test/'     # Path where audio files are stored
+
+test_df = pd.read_csv(TEST_CSV_PATH)
+
+load_plot_test_sample(test_df, TEST_DATA_PATH)
+
+# %%
 # check data distribution of training set
 dist = train_df.Class.value_counts()
 plt.figure(figsize=(8, 4))
@@ -113,9 +139,9 @@ plt.bar(dist.index, dist.values)
 files_in_error = []
 
 # Extracts audio features from data
-def extract_features(row):
+def extract_features(row, data_path):
     # function to load files and extract features
-    file_name = os.path.join(os.path.abspath(DATA_PATH), str(row.ID) + '.wav')
+    file_name = os.path.join(os.path.abspath(data_path), str(row.ID) + '.wav')
 
     # handle exception to check if there isn't a file which is corrupted
     try:
@@ -188,7 +214,9 @@ metrics = Metrics()
 features_train_file = Path("./features_train.pkl")
 
 if not features_train_file.is_file():
-    features = train_df.apply(extract_features, axis=1)
+    data_path = TRAIN_DATA_PATH
+    extract_features_func = partial(extract_features, data_path)
+    features = train_df.apply(extract_features_func, axis=1)
     dump_features(features, features_train_file)
     train_df = train_df.assign(features=features.values)
 else:
@@ -292,22 +320,23 @@ plt.legend([f1s_plot, precisions_plot, recalls_plot],
 # %%
 
 # data directory and csv file should have the same name
-DATA_PATH = './data/test.csv'     # Path where audio files are stored for test
 
-test = pd.read_csv(DATA_PATH)
+test_df = pd.read_csv(TEST_CSV_PATH)
 
 features_test_file = Path("./features_test.pkl")
 
 if not features_test_file.is_file():
-    features = test.apply(extract_features, axis=1)
+    data_path = TEST_DATA_PATH
+    extract_features_func = partial(extract_features, data_path)
+    features = test_df.apply(extract_features_func, axis=1)
     dump_features(features, features_test_file)
-    test = test.assign(features=features.values)
+    test_df = test_df.assign(features=features.values)
 else:
     features = pd.read_pickle('./features_test.pkl')
-    test = test.assign(features=features.values)
+    test_df = test_df.assign(features=features.values)
 
 # %%
-X_test = np.array(test.loc[:, 'features'])
+X_test = np.array(test_df.loc[:, 'features'])
 X_test = np.vstack(X_test)
 
 # Only MFCC features
@@ -322,8 +351,8 @@ X_test.shape
 predictions = model_inst.predict_classes(X_test)
 predict_class = lb.inverse_transform(predictions)
 
-test['Class'] = predict_class
-test_output = test.copy()
+test_df['Class'] = predict_class
+test_output = test_df.copy()
 
 # drop the 'feature' column as it is not required for submission
 test_output = test_output.drop(columns=['features'], axis=1)

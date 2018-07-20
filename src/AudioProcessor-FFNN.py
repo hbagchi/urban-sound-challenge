@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 from IPython.display import SVG
 
-from matplotlib.pyplot import specgram
 import matplotlib.pyplot as plt
 plt.rcParams.update({'figure.max_open_warning': 0})
 
@@ -34,14 +33,14 @@ from keras.utils import np_utils
 
 # %%
 #------------------------------------------------------------------------------
-# Data Exploration
+# Data Exploration Phase
 #------------------------------------------------------------------------------
-def load_sample_audios(train):
-    sample = train.groupby('Class', as_index=False).agg(np.random.choice)
+def load_sample_audios(train_df, data_path):
+    sample = train_df.groupby('Class', as_index=False).agg(np.random.choice)
     raw_audios = []
     class_audios = []
     for i in range(0, len(sample)):
-        x, sr = librosa.load('./data/train/' + str(sample.ID[i]) + '.wav')
+        x, sr = librosa.load(data_path + str(sample.ID[i]) + '.wav')
         x = librosa.resample(x, sr, 22050)
         raw_audios.append(x)
         class_audios.append(sample.Class[i])
@@ -49,6 +48,7 @@ def load_sample_audios(train):
 
 # Plot Waveplot
 def plot_waves(class_audios, raw_audios):
+    plt.clf()
     for x, label in zip(raw_audios, class_audios):
         plt.figure(figsize=(8, 20))
         plt.subplot(10, 1, class_audios.index(label)+1)
@@ -57,14 +57,18 @@ def plot_waves(class_audios, raw_audios):
 
 # Plot Specgram
 def plot_specgram(class_audios, raw_audios):
+    plt.clf()
     for x, label in zip(raw_audios, class_audios):
         plt.figure(figsize=(8, 40))
         plt.subplot(10, 1, class_audios.index(label)+1)
-        specgram(x, Fs=22050)
+        plt.specgram(x, Fs=22050)
+        plt.xlabel('Time')
+        plt.ylabel('Frequency')
         plt.title(label)
 
 # Plot log power specgram
 def plot_log_power_specgram(class_audios, raw_audios):
+    plt.clf()
     for x, label in zip(raw_audios, class_audios):
         plt.figure(figsize=(8, 40))
         plt.subplot(10, 1, class_audios.index(label)+1)
@@ -73,23 +77,23 @@ def plot_log_power_specgram(class_audios, raw_audios):
         plt.title(label)
 
 # Print raw mfcc for a sample
-def extract_raw_mfcc(class_audios, raw_audios):
+def print_raw_mfcc(class_audios, raw_audios):
     for x, label in zip(raw_audios, class_audios):
         mfccs = librosa.feature.mfcc(y=x, n_mfcc=64).T
-        return (label, mfccs)
+        print (label, mfccs, '\n')
 
 # %%
 # data directory and csv file should have the same name
 
-DATA_PATH = 'train'
+CSV_PATH = './data/train.csv'   # Path where csv files are stored
+DATA_PATH = './data/train/'     # Path where audio files are stored
 
-train = pd.read_csv('./data/' + DATA_PATH + '.csv')
+train_df = pd.read_csv(CSV_PATH)
 
-class_audios, raw_audios = load_sample_audios(train)
+class_audios, raw_audios = load_sample_audios(train_df, DATA_PATH)
 
 # %%
-label, mfccs_arr = extract_raw_mfcc(class_audios, raw_audios)
-label, mfccs_arr
+print_raw_mfcc(class_audios, raw_audios)
 
 # %%
 # Plot waveform, specgram and log power specgram
@@ -100,7 +104,7 @@ plot_log_power_specgram(class_audios, raw_audios)
 
 # %%
 # check data distribution of training set
-dist = train.Class.value_counts()
+dist = train_df.Class.value_counts()
 plt.figure(figsize=(8, 4))
 plt.xticks(rotation=60)
 plt.bar(dist.index, dist.values)
@@ -111,9 +115,7 @@ files_in_error = []
 # Extracts audio features from data
 def extract_features(row):
     # function to load files and extract features
-    file_name = os.path.join(
-            os.path.abspath('./data/'), 
-            DATA_PATH, str(row.ID) + '.wav')
+    file_name = os.path.join(os.path.abspath(DATA_PATH), str(row.ID) + '.wav')
 
     # handle exception to check if there isn't a file which is corrupted
     try:
@@ -186,19 +188,19 @@ metrics = Metrics()
 features_train_file = Path("./features_train.pkl")
 
 if not features_train_file.is_file():
-    features = train.apply(extract_features, axis=1)
+    features = train_df.apply(extract_features, axis=1)
     dump_features(features, features_train_file)
-    train = train.assign(features=features.values)
+    train_df = train_df.assign(features=features.values)
 else:
     features = pd.read_pickle('./features_train.pkl')
-    train = train.assign(features=features.values)
+    train_df = train_df.assign(features=features.values)
 
 # %%
-y = np.array(train.loc[:, 'Class'])
+y = np.array(train_df.loc[:, 'Class'])
 lb = LabelEncoder()
 y = np_utils.to_categorical(lb.fit_transform(y))
 
-X = np.array(train.loc[:, 'features'])
+X = np.array(train_df.loc[:, 'features'])
 X = np.vstack(X)
 
 # Only MFCC features
@@ -290,9 +292,9 @@ plt.legend([f1s_plot, precisions_plot, recalls_plot],
 # %%
 
 # data directory and csv file should have the same name
-DATA_PATH = 'test'
+DATA_PATH = './data/test.csv'     # Path where audio files are stored for test
 
-test = pd.read_csv('./data/' + DATA_PATH + '.csv')
+test = pd.read_csv(DATA_PATH)
 
 features_test_file = Path("./features_test.pkl")
 

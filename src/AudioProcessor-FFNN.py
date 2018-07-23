@@ -121,7 +121,7 @@ plot_log_power_specgram(class_audios, raw_audios)
 
 # %%
 # Load and Plot TEST SET
-TEST_CSV_PATH = './data/test.csv'     # Path where audio files are stored for test
+TEST_CSV_PATH = './data/test.csv'   # Path where audio files are stored for test
 TEST_DATA_PATH = './data/test/'     # Path where audio files are stored
 
 test_df = pd.read_csv(TEST_CSV_PATH)
@@ -232,10 +232,13 @@ X = np.array(train_df.loc[:, 'features'])
 X = np.vstack(X)
 
 # Only MFCC features
-X = X[:, :64]
+# X = X[:, :64]
 
-X -= X.mean(axis=0)
-X /= X.std(axis=0)
+train_mean = X.mean(axis=0)
+train_std = X.std(axis=0)
+
+X -= train_mean
+X /= train_std
 
 # %%
 # Build learning model
@@ -245,13 +248,15 @@ def buildModel(num_inputs, num_labels):
     model = Sequential()
 
     # Input layer
-    model.add(Dense(128, kernel_regularizer=regularizers.l2(0.001),
-                    input_shape=(num_inputs,)))
+    model.add(Dense(128, input_shape=(num_inputs,), 
+                    kernel_regularizer=regularizers.l2(0.01)))
+    
     model.add(Activation('relu'))
     model.add(Dropout(0.2))
     
     # Hidden layer
-    model.add(Dense(128, kernel_regularizer=regularizers.l2(0.001)))
+    model.add(Dense(128, kernel_regularizer=regularizers.l2(0.01)))
+    
     model.add(Activation('relu'))
     model.add(Dropout(0.2))
 
@@ -288,8 +293,9 @@ y_val = y[4348:]
 y = y[:4348]
 
 # %%
-history = model_inst.fit(X, y, batch_size=512, epochs=100, 
-                         validation_data=(x_val, y_val), callbacks=[metrics, early_stop])
+history = model_inst.fit(X, y, batch_size=512, epochs=100,
+                         validation_data=(x_val, y_val),
+                         callbacks=[metrics, early_stop])
 
 # Extract cost from history
 history_dict = history.history
@@ -340,10 +346,10 @@ X_test = np.array(test_df.loc[:, 'features'])
 X_test = np.vstack(X_test)
 
 # Only MFCC features
-X_test = X_test[:, :64]
+# X_test = X_test[:, :64]
 
-X_test -= X_test.mean(axis=0)
-X_test /= X_test.std(axis=0)
+X_test -= train_mean    # training dataset mean is used for normalization
+X_test /= train_std     # training std mean is used for normalization
 
 X_test.shape
 

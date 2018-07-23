@@ -1,8 +1,10 @@
 """
 Urban Sound Challenge - Sound Classification using Feed Forward Neural Network (FFNN)
+- No Validation Set
+
 @author: - Hitesh Bagchi
-Version: 1.0
-Date: 25th June 2018
+Version: 2.0
+Date: 16th July 2018
 """
 #------------------------------------------------------------------------------
 # Python libraries import
@@ -19,7 +21,6 @@ import matplotlib.pyplot as plt
 plt.rcParams.update({'figure.max_open_warning': 0})
 
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import f1_score, precision_score, recall_score
 
 # Audio library to extract audio features
 import librosa, librosa.display
@@ -28,7 +29,7 @@ import librosa, librosa.display
 from keras.models import Sequential
 from keras import regularizers
 from keras.layers import Dense, Activation, Dropout
-from keras.callbacks import Callback, EarlyStopping
+from keras.callbacks import EarlyStopping
 from keras.utils.vis_utils import model_to_dot
 from keras.utils import np_utils
 
@@ -72,11 +73,11 @@ def plot_log_power_specgram(class_audios, raw_audios):
         librosa.display.specshow(D, x_axis='time', y_axis='log')
         plt.title(label)
 
-# Print raw mfcc for a sample
+# Print raw mfcc for a randomly selected sample of each category
 def extract_raw_mfcc(class_audios, raw_audios):
     for x, label in zip(raw_audios, class_audios):
         mfccs = librosa.feature.mfcc(y=x, n_mfcc=64).T
-        return (label, mfccs)
+        print(label, mfccs, '\n')
 
 # %%
 # data directory and csv file should have the same name
@@ -88,8 +89,7 @@ train = pd.read_csv('./data/' + DATA_PATH + '.csv')
 class_audios, raw_audios = load_sample_audios(train)
 
 # %%
-label, mfccs_arr = extract_raw_mfcc(class_audios, raw_audios)
-label, mfccs_arr
+extract_raw_mfcc(class_audios, raw_audios)
 
 # %%
 # Plot waveform, specgram and log power specgram
@@ -104,8 +104,8 @@ dist = train.Class.value_counts()
 plt.figure(figsize=(8, 4))
 plt.xticks(rotation=60)
 plt.bar(dist.index, dist.values)
-# %%
 
+# %%
 files_in_error = []
 
 # Extracts audio features from data
@@ -152,35 +152,6 @@ def extract_features(row):
 def dump_features(features, features_filename):
     features_df = pd.DataFrame(features)
     features_df.to_pickle(features_filename)
-
-# %%
-class Metrics(Callback):
-
-    def on_train_begin(self, logs={}):
-        self.val_f1s = []
-        self.val_recalls = []
-        self.val_precisions = []
-        self.val_epochs = []
-
-    def on_epoch_end(self, epoch, logs={}):
-
-        self.val_epochs.append(epoch)
-
-        val_predict = (np.asarray(self.model.predict(self.validation_data[0]))).round()
-        val_targ = self.validation_data[1]
-
-        _val_f1 = f1_score(val_targ, val_predict, average="micro")
-        _val_recall = recall_score(val_targ, val_predict, average="micro")
-        _val_precision = precision_score(val_targ, val_predict, average="micro")
-
-        self.val_f1s.append(_val_f1)
-        self.val_recalls.append(_val_recall)
-        self.val_precisions.append(_val_precision)
-
-        print(" — val_f1: %f — val_precision: %f — val_recall: %f"
-              %(_val_f1, _val_precision, _val_recall), '\n')
-
-metrics = Metrics()
 
 # %%
 features_train_file = Path("./features_train.pkl")
@@ -246,107 +217,57 @@ SVG(model_to_dot(model_inst,
                  show_shapes=True, 
                  show_layer_names=True).create(prog='dot', format='svg'))
 
-# val_loss
+# monitor training loss
 early_stop = EarlyStopping(monitor='loss', min_delta=0, 
                        patience=2, verbose=0, mode='auto')
 
-# train set divided into 80% training set and 20% validation set
-# 80% train set = train set, 20% validation set = test set
-x_val = X[4348:]
-X = X[:4348]
+#######################################################################
+# train set divided into 80% training set and 20% test set
+# 80% train set = TRAIN SET, 20% train set = TEST SET
+#######################################################################
+x_train = X[:4348]
+x_test = X[4348:]
 
-y_val = y[4348:]
-y = y[:4348]
+y_train = y[:4348]
+y_test = y[4348:]
 
-train_orig = train[4348:].copy()
-
-# %%
-# validation_data=(x_val, y_val), 
-# metrics
-history = model_inst.fit(X, y, batch_size=512, epochs=100, 
-                         callbacks=[early_stop])
+test_df = train[4348:].copy()
 
 # %%
-# calculate predictions on hold out set
-pred_test = model_inst.predict_classes(x_val)
-pred_test_class = lb.inverse_transform(pred_test)
+history = model_inst.fit(x_train, y_train, batch_size=512, 
+                         epochs=100, callbacks=[early_stop])
 
-train_orig.loc[:, "PredClass"] = pred_test_class
-
-# drop the 'feature' column as it is not required for submission
-train_orig = train_orig.drop(columns=['features'], axis=1)
-
-train_orig['status'] = train_orig.Class == train_orig.PredClass
-
-train_orig.groupby("status").size()[1]/(train_orig.groupby("status").size()[0] + train_orig.groupby("status").size()[1])
-
-train_orig.to_csv('sub_test_01.csv', index=False)
-
-#%%
-
+# %%
 # Extract cost from history
 history_dict = history.history
 history_dict.keys()
-loss_values = history_dict['loss']
-val_loss_values = history_dict['val_loss']
-epochs = metrics.val_epochs
+loss_vals = history_dict['loss']
+acc_vals = history_dict['acc']
+epochs = history.epoch
 
-# Plot training and validation cost against epoch
-train_loss_plot, = plt.plot(epochs, loss_values, 'bo', label='Training Loss')
-val_loss_plot, = plt.plot(epochs, val_loss_values, 'b', label='Validation Loss')
-plt.title('Training and Validation Loss')
+# Plot training cost against epoch
+train_loss_plot, = plt.plot(epochs, loss_vals, 'bo', label='Training Loss')
+train_acc_plot, = plt.plot(epochs, acc_vals, 'r', label='Training Accuracy')
+
+plt.title('Training Loss and Accuracy')
 plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.legend([train_loss_plot, val_loss_plot], ["Training Loss", "Validation Loss"])
+plt.ylabel('Loss/Accuracy')
+plt.legend([train_loss_plot, train_acc_plot], ["Training Loss", "Training Acc"])
 
 # %%
-# Plot precision, recall and f1-score against epoch
-plt.clf()
-f1s_plot, = plt.plot(metrics.val_epochs, metrics.val_f1s, 'r+')
-precisions_plot, = plt.plot(metrics.val_epochs, metrics.val_precisions, 'b*')
-recalls_plot, = plt.plot(metrics.val_epochs, metrics.val_recalls, 'g^')
-plt.title('Precision, Recall and F1-Score')
-plt.xlabel('Epochs')
-plt.legend([f1s_plot, precisions_plot, recalls_plot], 
-           ["F1-Score", "Precision", "Recall"])
+# calculate predictions on hold out set (20% training set)
+pred_test = model_inst.predict_classes(x_test)
+pred_test_class = lb.inverse_transform(pred_test)
 
-# %%
+test_df.loc[:, "PredClass"] = pred_test_class
 
-# data directory and csv file should have the same name
-DATA_PATH = 'test'
+# drop the 'feature' column as it is not required
+test_df = test_df.drop(columns=['features'], axis=1)
 
-test = pd.read_csv('./data/' + DATA_PATH + '.csv')
+test_df['status'] = (test_df.Class == test_df.PredClass)
 
-features_test_file = Path("./features_test.pkl")
+correct_match_count = test_df.groupby("status").size()[1]
+incorrect_match_count = test_df.groupby("status").size()[0]
 
-if not features_test_file.is_file():
-    features = test.apply(extract_features, axis=1)
-    dump_features(features, features_test_file)
-    test = test.assign(features=features.values)
-else:
-    features = pd.read_pickle('./features_test.pkl')
-    test = test.assign(features=features.values)
-
-# %%
-X_test = np.array(test.loc[:, 'features'])
-X_test = np.vstack(X_test)
-
-# Only MFCC features
-# X_test = X_test[:, :64]
-
-X_test -= X_test.mean(axis=0)
-X_test /= X_test.std(axis=0)
-
-X_test.shape
-
-# calculate predictions
-predictions = model_inst.predict_classes(X_test)
-predict_class = lb.inverse_transform(predictions)
-
-test['Class'] = predict_class
-test_output = test.copy()
-
-# drop the 'feature' column as it is not required for submission
-test_output = test_output.drop(columns=['features'], axis=1)
-
-test_output.to_csv('sub01.csv', index=False)
+acc_ratio = correct_match_count/(correct_match_count + incorrect_match_count)
+acc_ratio

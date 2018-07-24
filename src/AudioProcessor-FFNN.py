@@ -1,8 +1,10 @@
 """
 Urban Sound Challenge - Sound Classification using Feed Forward Neural Network (FFNN)
+- Grid Search
+
 @author: - Hitesh Bagchi
 Version: 1.0
-Date: 25th June 2018
+Date: 24th July 2018
 """
 #------------------------------------------------------------------------------
 # Python libraries import
@@ -12,14 +14,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from IPython.display import SVG
 from functools import partial
 
 import matplotlib.pyplot as plt
 plt.rcParams.update({'figure.max_open_warning': 0})
 
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import f1_score, precision_score, recall_score
+from sklearn.model_selection import GridSearchCV
 
 # Audio library to extract audio features
 import librosa, librosa.display
@@ -28,9 +29,10 @@ import librosa, librosa.display
 from keras.models import Sequential
 from keras import regularizers
 from keras.layers import Dense, Activation, Dropout
-from keras.callbacks import Callback, EarlyStopping
-from keras.utils.vis_utils import model_to_dot
+from keras.callbacks import EarlyStopping
 from keras.utils import np_utils
+from keras.wrappers.scikit_learn import KerasClassifier
+from keras.constraints import maxnorm
 
 # %%
 #------------------------------------------------------------------------------
@@ -121,11 +123,10 @@ plot_log_power_specgram(class_audios, raw_audios)
 
 # %%
 # Load and Plot TEST SET
-TEST_CSV_PATH = './data/test.csv'   # Path where audio files are stored for test
-TEST_DATA_PATH = './data/test/'     # Path where audio files are stored
+TEST_CSV_PATH = './data/test.csv'   # Path where csv files are stored (test set)
+TEST_DATA_PATH = './data/test/'     # Path where audio files are stored (test set)
 
 test_df = pd.read_csv(TEST_CSV_PATH)
-
 load_plot_test_sample(test_df, TEST_DATA_PATH)
 
 # %%
@@ -134,8 +135,8 @@ dist = train_df.Class.value_counts()
 plt.figure(figsize=(8, 4))
 plt.xticks(rotation=60)
 plt.bar(dist.index, dist.values)
-# %%
 
+# %%
 files_in_error = []
 
 # Extracts audio features from data
@@ -182,35 +183,6 @@ def dump_features(features, features_filename):
     features_df.to_pickle(features_filename)
 
 # %%
-class Metrics(Callback):
-
-    def on_train_begin(self, logs={}):
-        self.val_f1s = []
-        self.val_recalls = []
-        self.val_precisions = []
-        self.val_epochs = []
-
-    def on_epoch_end(self, epoch, logs={}):
-
-        self.val_epochs.append(epoch)
-
-        val_predict = (np.asarray(self.model.predict(self.validation_data[0]))).round()
-        val_targ = self.validation_data[1]
-
-        _val_f1 = f1_score(val_targ, val_predict, average="micro")
-        _val_recall = recall_score(val_targ, val_predict, average="micro")
-        _val_precision = precision_score(val_targ, val_predict, average="micro")
-
-        self.val_f1s.append(_val_f1)
-        self.val_recalls.append(_val_recall)
-        self.val_precisions.append(_val_precision)
-
-        print(" — val_f1: %f — val_precision: %f — val_recall: %f"
-              %(_val_f1, _val_precision, _val_recall), '\n')
-
-metrics = Metrics()
-
-# %%
 features_train_file = Path("./features_train.pkl")
 
 if not features_train_file.is_file():
@@ -242,30 +214,42 @@ X /= train_std
 
 # %%
 # Build learning model
-def buildModel(num_inputs, num_labels):
+def build_model(num_input_vars, 
+                num_target_labels, 
+                dropout_rate=0.2, 
+                weight_constraint=0,
+                optimizer='rmsprop',
+                init_mode='uniform',
+                neurons=128,
+                activation='relu',
+                regularizer_l2=0.01):
     
     # build model
     model = Sequential()
 
     # Input layer
-    model.add(Dense(128, input_shape=(num_inputs,), 
-                    kernel_regularizer=regularizers.l2(0.01)))
+    model.add(Dense(neurons, input_shape=(num_inputs,),
+                    kernel_initializer=init_mode,
+                    kernel_constraint=maxnorm(weight_constraint),
+                    kernel_regularizer=regularizers.l2(regularizer_l2)))
     
-    model.add(Activation('relu'))
-    model.add(Dropout(0.2))
+    model.add(Activation(activation))
+    model.add(Dropout(dropout_rate))
     
     # Hidden layer
-    model.add(Dense(128, kernel_regularizer=regularizers.l2(0.01)))
+    model.add(Dense(neurons, kernel_initializer=init_mode,
+                    kernel_constraint=maxnorm(weight_constraint),
+                    kernel_regularizer=regularizers.l2(regularizer_l2)))
     
-    model.add(Activation('relu'))
-    model.add(Dropout(0.2))
+    model.add(Activation(activation))
+    model.add(Dropout(dropout_rate))
 
     # Output layer
     model.add(Dense(num_labels))
     model.add(Activation('softmax'))
 
     # Compile model
-    model.compile(optimizer='rmsprop',
+    model.compile(optimizer=optimizer,
                   loss='categorical_crossentropy', 
                   metrics=['accuracy'])
     
@@ -275,11 +259,10 @@ def buildModel(num_inputs, num_labels):
 num_labels = y.shape[1] # Toral number of output labels
 num_inputs = X.shape[1] # Total number 0f input variables
 
-model_inst = buildModel(num_inputs, num_labels)    
-
-SVG(model_to_dot(model_inst, 
-                 show_shapes=True, 
-                 show_layer_names=True).create(prog='dot', format='svg'))
+# create model
+model_inst = KerasClassifier(build_fn=build_model, 
+                             num_input_vars=num_inputs, 
+                             num_target_labels=num_inputs)
 
 early_stop = EarlyStopping(monitor='val_loss', min_delta=0, 
                        patience=2, verbose=0, mode='auto')
@@ -293,35 +276,42 @@ y_val = y[4348:]
 y = y[:4348]
 
 # %%
-history = model_inst.fit(X, y, batch_size=512, epochs=100,
-                         validation_data=(x_val, y_val),
-                         callbacks=[metrics, early_stop])
+# define the hyperparameters for grid search
+batch_size = [8, 16, 32, 64, 96, 128, 196, 512]
+dropout_rate = [0.2, 0.3, 0.5]
+weight_constraint = [1, 2, 3, 4, 5]
+optimizer = ['SGD', 'RMSprop', 'Adagrad', 'Adadelta', 'Adam', 'Adamax', 'Nadam']
+init_mode = ['uniform', 'lecun_uniform', 'normal', 'zero', 
+             'glorot_normal', 'glorot_uniform', 'he_normal', 'he_uniform']
+neurons = [32, 64, 128, 156, 192, 256]
+activation = ['softmax', 'softplus', 'softsign', 'relu', 'tanh', 
+              'sigmoid', 'hard_sigmoid', 'linear']
+regularizer_l2 = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3]
 
-# Extract cost from history
-history_dict = history.history
-history_dict.keys()
-loss_values = history_dict['loss']
-val_loss_values = history_dict['val_loss']
-epochs = metrics.val_epochs
+param_grid = dict(batch_size=batch_size, 
+                  dropout_rate=dropout_rate, 
+                  weight_constraint=weight_constraint,
+                  optimizer=optimizer,
+                  init_mode=init_mode,
+                  neurons=neurons,
+                  activation=activation,
+                  regularizer_l2=regularizer_l2)
 
-# Plot training and validation cost against epoch
-train_loss_plot, = plt.plot(epochs, loss_values, 'bo', label='Training Loss')
-val_loss_plot, = plt.plot(epochs, val_loss_values, 'b', label='Validation Loss')
-plt.title('Training and Validation Loss')
-plt.xlabel('Epochs')
-plt.ylabel('Loss')
-plt.legend([train_loss_plot, val_loss_plot], ["Training Loss", "Validation Loss"])
+grid_model_inst = GridSearchCV(estimator=model_inst, param_grid=param_grid)
+
+grid_result = grid_model_inst.fit(X, y, epochs=100, 
+                                  validation_data=(x_val, y_val), 
+                                  callbacks=[early_stop], 
+                                  verbose=1)
+
+# summarize results
+grid_result.best_score_, grid_result.best_params_
 
 # %%
-# Plot precision, recall and f1-score against epoch
-plt.clf()
-f1s_plot, = plt.plot(metrics.val_epochs, metrics.val_f1s, 'r+')
-precisions_plot, = plt.plot(metrics.val_epochs, metrics.val_precisions, 'b*')
-recalls_plot, = plt.plot(metrics.val_epochs, metrics.val_recalls, 'g^')
-plt.title('Precision, Recall and F1-Score')
-plt.xlabel('Epochs')
-plt.legend([f1s_plot, precisions_plot, recalls_plot], 
-           ["F1-Score", "Precision", "Recall"])
+
+history = model_inst.fit(X, y, batch_size=512, epochs=100,
+                         validation_data=(x_val, y_val),
+                         callbacks=[early_stop])
 
 # %%
 
@@ -354,7 +344,7 @@ X_test /= train_std     # training std mean is used for normalization
 X_test.shape
 
 # calculate predictions
-predictions = model_inst.predict_classes(X_test)
+predictions = model_inst.predict(X_test)
 predict_class = lb.inverse_transform(predictions)
 
 test_df['Class'] = predict_class

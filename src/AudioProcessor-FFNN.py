@@ -32,7 +32,6 @@ from keras.layers import Dense, Activation, Dropout
 from keras.callbacks import EarlyStopping
 from keras.utils import np_utils
 from keras.wrappers.scikit_learn import KerasClassifier
-from keras.constraints import maxnorm
 
 # %%
 #------------------------------------------------------------------------------
@@ -214,12 +213,10 @@ X /= train_std
 
 # %%
 # Build learning model
-def build_model(num_input_vars, 
-                num_target_labels, 
-                dropout_rate=0.2, 
-                weight_constraint=0,
+def build_model(num_input_vars,
+                num_target_labels,
+                dropout_rate=0.2,
                 optimizer='rmsprop',
-                init_mode='uniform',
                 neurons=128,
                 activation='relu',
                 regularizer_l2=0.01):
@@ -229,17 +226,13 @@ def build_model(num_input_vars,
 
     # Input layer
     model.add(Dense(neurons, input_shape=(num_inputs,),
-                    kernel_initializer=init_mode,
-                    kernel_constraint=maxnorm(weight_constraint),
                     kernel_regularizer=regularizers.l2(regularizer_l2)))
     
     model.add(Activation(activation))
     model.add(Dropout(dropout_rate))
     
     # Hidden layer
-    model.add(Dense(neurons, kernel_initializer=init_mode,
-                    kernel_constraint=maxnorm(weight_constraint),
-                    kernel_regularizer=regularizers.l2(regularizer_l2)))
+    model.add(Dense(neurons, kernel_regularizer=regularizers.l2(regularizer_l2)))
     
     model.add(Activation(activation))
     model.add(Dropout(dropout_rate))
@@ -277,29 +270,25 @@ y = y[:4348]
 
 # %%
 # define the hyperparameters for grid search
-batch_size = [8, 16, 32, 64, 96, 128, 196, 512]
+batch_size = [128, 256, 512]
 dropout_rate = [0.2, 0.3, 0.5]
-weight_constraint = [1, 2, 3, 4, 5]
-optimizer = ['SGD', 'RMSprop', 'Adagrad', 'Adadelta', 'Adam', 'Adamax', 'Nadam']
-init_mode = ['uniform', 'lecun_uniform', 'normal', 'zero', 
-             'glorot_normal', 'glorot_uniform', 'he_normal', 'he_uniform']
-neurons = [32, 64, 128, 156, 192, 256]
-activation = ['softmax', 'softplus', 'softsign', 'relu', 'tanh', 
-              'sigmoid', 'hard_sigmoid', 'linear']
-regularizer_l2 = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3]
+optimizer = ['rmsprop', 'Adam']
+neurons = [96, 128, 156]
+activation = ['relu']
+regularizer_l2 = [0.01, 0.1, 0.3]
 
 param_grid = dict(batch_size=batch_size, 
-                  dropout_rate=dropout_rate, 
-                  weight_constraint=weight_constraint,
+                  dropout_rate=dropout_rate,
                   optimizer=optimizer,
-                  init_mode=init_mode,
                   neurons=neurons,
                   activation=activation,
                   regularizer_l2=regularizer_l2)
 
 grid_model_inst = GridSearchCV(estimator=model_inst, param_grid=param_grid)
 
-grid_result = grid_model_inst.fit(X, y, epochs=100, 
+epochs = 200
+
+grid_result = grid_model_inst.fit(X, y, epochs=epochs, 
                                   validation_data=(x_val, y_val), 
                                   callbacks=[early_stop], 
                                   verbose=1)
@@ -308,10 +297,42 @@ grid_result = grid_model_inst.fit(X, y, epochs=100,
 grid_result.best_score_, grid_result.best_params_
 
 # %%
+activation = grid_result.best_params_.get('activation')
+batch_size = grid_result.best_params_.get('batch_size')
+dropout_rate = grid_result.best_params_.get('dropout_rate')
+neurons = grid_result.best_params_.get('neurons')
+optimizer = grid_result.best_params_.get('optimizer')
+regularizer_l2 = grid_result.best_params_.get('regularizer_l2')
 
-history = model_inst.fit(X, y, batch_size=512, epochs=100,
+grid_model = build_model(num_inputs,
+                         num_labels,
+                         dropout_rate=dropout_rate,
+                         optimizer=optimizer,
+                         neurons=neurons,
+                         activation=activation,
+                         regularizer_l2=regularizer_l2)
+
+history = grid_model.fit(X, y, batch_size=batch_size, epochs=epochs,
                          validation_data=(x_val, y_val),
                          callbacks=[early_stop])
+
+# %%
+# Extract cost from history
+
+history_dict = history.history
+history_dict.keys()
+loss_values = history_dict['loss']
+val_loss_values = history_dict['val_loss']
+epochs = history.epoch
+
+# Plot training and validation cost against epoch
+
+train_loss_plot, = plt.plot(epochs, loss_values, 'bo', label='Training Loss')
+val_loss_plot, = plt.plot(epochs, val_loss_values, 'b', label='Validation Loss')
+plt.title('Training and Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend([train_loss_plot, val_loss_plot], ["Training Loss", "Validation Loss"])
 
 # %%
 
@@ -344,7 +365,7 @@ X_test /= train_std     # training std mean is used for normalization
 X_test.shape
 
 # calculate predictions
-predictions = model_inst.predict(X_test)
+predictions = grid_model.predict_classes(X_test)
 predict_class = lb.inverse_transform(predictions)
 
 test_df['Class'] = predict_class

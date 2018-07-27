@@ -269,6 +269,10 @@ y_val = y[4348:]
 y = y[:4348]
 
 # %%
+#################################################
+# Grid Search Section
+#################################################
+
 # define the hyperparameters for grid search
 batch_size = [128, 256, 512]
 dropout_rate = [0.2, 0.3, 0.5]
@@ -276,6 +280,7 @@ optimizer = ['rmsprop', 'Adam']
 neurons = [96, 128, 156]
 activation = ['relu']
 regularizer_l2 = [0.01, 0.1, 0.3]
+epochs = 200
 
 param_grid = dict(batch_size=batch_size, 
                   dropout_rate=dropout_rate,
@@ -286,9 +291,7 @@ param_grid = dict(batch_size=batch_size,
 
 grid_model_inst = GridSearchCV(estimator=model_inst, param_grid=param_grid)
 
-epochs = 200
-
-grid_result = grid_model_inst.fit(X, y, epochs=epochs, 
+grid_result = grid_model_inst.fit(X, y, epochs=epochs,
                                   validation_data=(x_val, y_val), 
                                   callbacks=[early_stop], 
                                   verbose=1)
@@ -297,12 +300,30 @@ grid_result = grid_model_inst.fit(X, y, epochs=epochs,
 grid_result.best_score_, grid_result.best_params_
 
 # %%
-activation = grid_result.best_params_.get('activation')
-batch_size = grid_result.best_params_.get('batch_size')
-dropout_rate = grid_result.best_params_.get('dropout_rate')
-neurons = grid_result.best_params_.get('neurons')
-optimizer = grid_result.best_params_.get('optimizer')
-regularizer_l2 = grid_result.best_params_.get('regularizer_l2')
+''' Get Hyperparameters from Grid Search or set the hyperparameters manually
+    if Grid Search is not run to save time
+'''
+
+if 'grid_result' in globals():
+    activation = grid_result.best_params_.get('activation')
+    batch_size = grid_result.best_params_.get('batch_size')
+    dropout_rate = grid_result.best_params_.get('dropout_rate')
+    neurons = grid_result.best_params_.get('neurons')
+    optimizer = grid_result.best_params_.get('optimizer')
+    regularizer_l2 = grid_result.best_params_.get('regularizer_l2')
+else:
+    activation = 'relu'
+    batch_size = 512
+    dropout_rate = 0.3
+    neurons = 128
+    optimizer = 'rmsprop'
+    regularizer_l2 = 0.01
+    epochs = 200
+
+# create model
+grid_model = KerasClassifier(build_fn=build_model, 
+                             num_input_vars=num_inputs, 
+                             num_target_labels=num_inputs)
 
 grid_model = build_model(num_inputs,
                          num_labels,
@@ -311,6 +332,7 @@ grid_model = build_model(num_inputs,
                          neurons=neurons,
                          activation=activation,
                          regularizer_l2=regularizer_l2)
+grid_model.summary()
 
 history = grid_model.fit(X, y, batch_size=batch_size, epochs=epochs,
                          validation_data=(x_val, y_val),

@@ -155,7 +155,7 @@ adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
 model.compile(loss='categorical_crossentropy', metrics=['accuracy'], optimizer=adam)
 
 # for quicker training, just using one epoch, you can experiment with more
-model.fit(X, y, validation_data=(valid_x, valid_y), batch_size=32, nb_epoch=1)
+model.fit(X, y, validation_split=0.2, batch_size=32, nb_epoch=1)
 
 # %%
 

@@ -18,17 +18,18 @@ from sklearn.preprocessing import LabelEncoder
 
 from keras.models import Sequential
 from keras.layers import Dense, Dropout, Activation, Flatten
-from keras.layers import Convolution2D, MaxPooling2D
+from keras.layers import Conv2D, MaxPooling2D
 from keras.optimizers import Adam
 
 from keras.utils import np_utils
 
 # %%
-# Load and Plot TEST SET
-TEST_CSV_PATH = './data/test.csv'   # Path where csv files are stored (test set)
-TEST_DATA_PATH = './data/test/'     # Path where audio files are stored (test set)
+DATA_DIR = 'trainMini'
 
-test_df = pd.read_csv(TEST_CSV_PATH)
+# Load TRAINING SET
+TRAIN_CSV_PATH = './data/' + DATA_DIR + '.csv'  # Path where csv files are stored (train set)
+
+train_df = pd.read_csv(TRAIN_CSV_PATH)
 
 # %%
 def windows(data, window_size):
@@ -45,6 +46,7 @@ def extract_features(data_dir, row, bands = 60, frames = 41, file_ext="*.wav"):
 
     window_size = 512 * (frames - 1)
     log_specgrams = []
+    labels = []
 
     file_name = os.path.join(os.path.abspath('./data/'), data_dir, str(row.ID) + '.wav')
 
@@ -60,6 +62,9 @@ def extract_features(data_dir, row, bands = 60, frames = 41, file_ext="*.wav"):
                 logspec = logspec.T.flatten()[:, np.newaxis].T
                 log_specgrams.append(logspec)
 
+                if 'Class' in row.index:
+                    labels.append(row.Class) 
+
         log_specgrams = np.asarray(log_specgrams).reshape(len(log_specgrams),bands,frames, 1)
         features = np.concatenate((log_specgrams, np.zeros(np.shape(log_specgrams))), axis = 3)
 
@@ -70,7 +75,8 @@ def extract_features(data_dir, row, bands = 60, frames = 41, file_ext="*.wav"):
         print(file_name, e)
         return None
 
-    return features
+    return pd.Series([features, np.array(labels)])
+#    return features
 
 # %%
 def dump_features(features, features_filename):
@@ -81,27 +87,26 @@ def dump_features(features, features_filename):
 #------------------------------------------------------------------------------
 # Load training data and extract features
 #------------------------------------------------------------------------------
-DATA_DIR = 'trainMini'
-
-train = pd.read_csv(os.path.join(os.path.abspath('./data/'), DATA_DIR + '.csv'))
-
 features_cnn_train_file = Path("./features_cnn_train.pkl")
 
 if not features_cnn_train_file.is_file():
     extract_features_train = partial(extract_features, DATA_DIR)
-    features = train.apply(extract_features_train, axis=1)
-    dump_features(features, features_cnn_train_file)
-    train = train.assign(features=features.values)
+
+    features_labels = train_df.apply(extract_features_train, axis=1)
+    dump_features(features_labels, features_cnn_train_file)
 else:
-    features = pd.read_pickle('./features_cnn_train.pkl')
-    train = train.assign(features=features.values)
+    features_labels = pd.read_pickle('./features_cnn_train.pkl')
+
+features = features_labels[0]
+labels = features_labels[1]
+train_df = train_df.assign(features=features.values)
 
 # %%
-y = np.array(train.loc[:, 'Class'])
+y = np.concatenate([item.tolist() for item in labels])
 lb = LabelEncoder()
 y = np_utils.to_categorical(lb.fit_transform(y))
 
-X = np.array(train.loc[:, 'features'])
+X = np.array(train_df.loc[:, 'features'])
 X = np.vstack(X)
 
 # %%
@@ -120,17 +125,17 @@ f_size = 2
 
 # first layer applies 32 convolution filters 
 # input: 60x41 data frames with 2 channels => (60,41,2) tensors
-model.add(Convolution2D(32, f_size, f_size, border_mode='same', input_shape=(bands, frames, num_channels)))
+model.add(Conv2D(32, kernel_size=(2, 2), input_shape=(bands, frames, num_channels)))
 model.add(Activation('relu'))
-model.add(Convolution2D(32, f_size, f_size))
+model.add(Conv2D(32, kernel_size=(2, 2)))
 model.add(Activation('relu'))
 model.add(MaxPooling2D(pool_size=(2, 2)))
 model.add(Dropout(0.15))
 
 # next layer applies 64 convolution filters
-model.add(Convolution2D(64, f_size, f_size, border_mode='same'))
+model.add(Conv2D(64, kernel_size=(2, 2)))
 model.add(Activation('relu'))
-model.add(Convolution2D(64, f_size, f_size))
+model.add(Conv2D(64, kernel_size=(2, 2)))
 model.add(Activation('relu'))
 model.add(MaxPooling2D(pool_size=(2, 2)))
 model.add(Dropout(0.2))
@@ -154,26 +159,33 @@ adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
 # now compile the model, Keras will take care of the Tensorflow boilerplate
 model.compile(loss='categorical_crossentropy', metrics=['accuracy'], optimizer=adam)
 
+# %%
 # for quicker training, just using one epoch, you can experiment with more
-model.fit(X, y, validation_split=0.2, batch_size=32, nb_epoch=1)
+epochs = 10
+model.fit(X, y, validation_split=0.2, batch_size=32, epochs=epochs)
 
 # %%
-
 # data directory and csv file should have the same name
+
+# Load TEST SET
+DATA_DIR = 'testMini'
+
+TEST_CSV_PATH = './data/' + DATA_DIR + '.csv'   # Path where csv files are stored (test set)
 
 test_df = pd.read_csv(TEST_CSV_PATH)
 
-features_test_file = Path("./features_test.pkl")
+features_cnn_test_file = Path("./features_cnn_test.pkl")
 
-if not features_test_file.is_file():
-    data_path = TEST_DATA_PATH
+if not features_cnn_test_file.is_file():
+    data_path = DATA_DIR
     extract_features_func = partial(extract_features, data_path)
-    features = test_df.apply(extract_features_func, axis=1)
-    dump_features(features, features_test_file)
-    test_df = test_df.assign(features=features.values)
+    features_labels_test = test_df.apply(extract_features_func, axis=1)
+    dump_features(features_labels_test, features_cnn_test_file)
 else:
-    features = pd.read_pickle('./features_test.pkl')
-    test_df = test_df.assign(features=features.values)
+    features_labels_test = pd.read_pickle('./features_cnn_test.pkl')
+
+features_test = features_labels_test[0]
+test_df = test_df.assign(features=features_test.values)
 
 # %%
 X_test = np.array(test_df.loc[:, 'features'])
@@ -182,8 +194,8 @@ X_test = np.vstack(X_test)
 # Only MFCC features
 # X_test = X_test[:, :64]
 
-X_test -= train_mean    # training dataset mean is used for normalization
-X_test /= train_std     # training std mean is used for normalization
+# X_test -= train_mean    # training dataset mean is used for normalization
+# X_test /= train_std     # training std mean is used for normalization
 
 X_test.shape
 
@@ -199,4 +211,4 @@ test_output = test_df.copy()
 # drop the 'feature' column as it is not required for submission
 test_output = test_output.drop(columns=['features'], axis=1)
 
-test_output.to_csv('sub01.csv', index=False)
+test_output.to_csv('sub01-cnn.csv', index=False)

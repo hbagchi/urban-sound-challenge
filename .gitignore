@@ -1,4 +1,4 @@
-*.pkl
+**/*.pkl
 /data/test/*.wav
 /data/train/*.wav
 /data/trainShort/*.wav

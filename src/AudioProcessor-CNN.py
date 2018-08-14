@@ -24,12 +24,24 @@ from keras.optimizers import Adam
 from keras.utils import np_utils
 
 # %%
-DATA_DIR = 'trainMini'
+TR_DATA_DIR = 'train'
+TST_DATA_DIR = 'test'
 
 # Load TRAINING SET
-TRAIN_CSV_PATH = './data/' + DATA_DIR + '.csv'  # Path where csv files are stored (train set)
+# Path where csv files are stored (train set)
+TRAIN_CSV_PATH = './data/' + TR_DATA_DIR + '.csv'
 
 train_df = pd.read_csv(TRAIN_CSV_PATH)
+
+# %%
+#------------------------------------------------------------------------------
+# function to repeat the audio if it has less than 20480 (512*40) samples 
+#------------------------------------------------------------------------------
+def repeat_sample(data):
+    data_add = data
+    while (len(data_add) < 20480):
+        data_add = np.append(data_add, data)
+    return data_add
 
 # %%
 def windows(data, window_size):
@@ -47,13 +59,16 @@ def extract_features(data_dir, row, bands = 60, frames = 41, file_ext="*.wav"):
     window_size = 512 * (frames - 1)
     log_specgrams = []
     labels = []
+    ID_segs = []
 
     file_name = os.path.join(os.path.abspath('./data/'), data_dir, str(row.ID) + '.wav')
 
     # handle exception to check for corrupted or invalid file
     try:
         X, sample_rate = librosa.load(file_name)
-
+        
+        X = repeat_sample(X)
+        
         for (start, end) in windows(X, window_size):
             if(len(X[start:end]) == window_size):
                 signal = X[start:end]
@@ -64,6 +79,8 @@ def extract_features(data_dir, row, bands = 60, frames = 41, file_ext="*.wav"):
 
                 if 'Class' in row.index:
                     labels.append(row.Class) 
+                
+                ID_segs.append(row.ID)
 
         log_specgrams = np.asarray(log_specgrams).reshape(len(log_specgrams),bands,frames, 1)
         features = np.concatenate((log_specgrams, np.zeros(np.shape(log_specgrams))), axis = 3)
@@ -75,8 +92,7 @@ def extract_features(data_dir, row, bands = 60, frames = 41, file_ext="*.wav"):
         print(file_name, e)
         return None
 
-    return pd.Series([features, np.array(labels)])
-#    return features
+    return pd.Series([np.array(ID_segs), features, np.array(labels)])
 
 # %%
 def dump_features(features, features_filename):
@@ -90,15 +106,16 @@ def dump_features(features, features_filename):
 features_cnn_train_file = Path("./features_cnn_train.pkl")
 
 if not features_cnn_train_file.is_file():
-    extract_features_train = partial(extract_features, DATA_DIR)
+    extract_features_train = partial(extract_features, TR_DATA_DIR)
 
     features_labels = train_df.apply(extract_features_train, axis=1)
     dump_features(features_labels, features_cnn_train_file)
 else:
     features_labels = pd.read_pickle('./features_cnn_train.pkl')
 
-features = features_labels[0]
-labels = features_labels[1]
+ID = features_labels[0]
+features = features_labels[1]
+labels = features_labels[2]
 train_df = train_df.assign(features=features.values)
 
 # %%
@@ -108,6 +125,12 @@ y = np_utils.to_categorical(lb.fit_transform(y))
 
 X = np.array(train_df.loc[:, 'features'])
 X = np.vstack(X)
+
+train_mean = X.mean(axis=0)
+train_std = X.std(axis=0)
+
+X -= train_mean
+X /= train_std
 
 # %%
 num_labels = y.shape[1] # Toral number of output labels
@@ -168,23 +191,25 @@ model.fit(X, y, validation_split=0.2, batch_size=32, epochs=epochs)
 # data directory and csv file should have the same name
 
 # Load TEST SET
-DATA_DIR = 'testMini'
-
-TEST_CSV_PATH = './data/' + DATA_DIR + '.csv'   # Path where csv files are stored (test set)
+# Path where csv files are stored (test set)
+TEST_CSV_PATH = './data/' + TST_DATA_DIR + '.csv'
 
 test_df = pd.read_csv(TEST_CSV_PATH)
 
 features_cnn_test_file = Path("./features_cnn_test.pkl")
 
 if not features_cnn_test_file.is_file():
-    data_path = DATA_DIR
+    data_path = TST_DATA_DIR
     extract_features_func = partial(extract_features, data_path)
     features_labels_test = test_df.apply(extract_features_func, axis=1)
     dump_features(features_labels_test, features_cnn_test_file)
 else:
     features_labels_test = pd.read_pickle('./features_cnn_test.pkl')
+    
+ID_segs_tst = features_labels_test[0]
+ID_segs_tst = np.concatenate([item.tolist() for item in ID_segs_tst])
 
-features_test = features_labels_test[0]
+features_test = features_labels_test[1]
 test_df = test_df.assign(features=features_test.values)
 
 # %%
@@ -194,8 +219,8 @@ X_test = np.vstack(X_test)
 # Only MFCC features
 # X_test = X_test[:, :64]
 
-# X_test -= train_mean    # training dataset mean is used for normalization
-# X_test /= train_std     # training std mean is used for normalization
+X_test -= train_mean    # training dataset mean is used for normalization
+X_test /= train_std     # training std mean is used for normalization
 
 X_test.shape
 
@@ -203,7 +228,14 @@ X_test.shape
 predictions = model.predict_classes(X_test)
 predict_class = lb.inverse_transform(predictions)
 
-test_df['Class'] = predict_class
+# Aggregate segment predictions by ID and select the Class with max count
+
+id_class_df = pd.DataFrame(data=[ID_segs_tst, predict_class]).T
+id_class_df = id_class_df.rename(columns={0:"ID", 1:"Class"})
+
+seg_merged_df = id_class_df.groupby(['ID'], as_index=False)['Class'].max()
+
+test_df['Class'] = seg_merged_df['Class']
 test_output = test_df.copy()
 
 # %%
@@ -212,3 +244,5 @@ test_output = test_df.copy()
 test_output = test_output.drop(columns=['features'], axis=1)
 
 test_output.to_csv('sub01-cnn.csv', index=False)
+
+# %%
